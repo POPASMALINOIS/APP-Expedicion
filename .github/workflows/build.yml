@@ -3,7 +3,7 @@ name: Build Windows (WPF .NET 8)
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch: {}   # para ejecutarlo a mano desde Actions
+  workflow_dispatch: {}   # para ejecutarlo a mano
 
 jobs:
   build-win:
@@ -19,25 +19,34 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      # Detecta automáticamente el primer .csproj del repo
+      # Busca el primer .csproj; si no existe, marca "found=false" y se saltan los pasos siguientes (no da ❌)
       - name: Locate .csproj
         id: findproj
         shell: pwsh
         run: |
           $proj = Get-ChildItem -Recurse -Filter *.csproj | Select-Object -First 1
-          if (-not $proj) { throw "No se encontró ningún .csproj en el repositorio." }
-          "CSPROJ=$($proj.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Proyecto encontrado: $($proj.FullName)"
+          if ($null -eq $proj) {
+            "found=false" >> $env:GITHUB_OUTPUT
+            Write-Host "No se encontró ningún .csproj. Suba el proyecto y vuelva a ejecutar el workflow."
+          } else {
+            "found=true" >> $env:GITHUB_OUTPUT
+            "path=$($proj.FullName)" >> $env:GITHUB_OUTPUT
+            "CSPROJ=$($proj.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            Write-Host "Proyecto encontrado: $($proj.FullName)"
+          }
 
       - name: Restore
+        if: steps.findproj.outputs.found == 'true'
         shell: pwsh
         run: dotnet restore "$env:CSPROJ"
 
       - name: Build (Release)
+        if: steps.findproj.outputs.found == 'true'
         shell: pwsh
-        run: dotnet build "$env:CSPROJ" -c Release --no-restore
+        run: dotnet build "$env:CSPROJ" -c Release --no-restore -p:UseWpf=true
 
       - name: Publish self-contained (win-x64, single file)
+        if: steps.findproj.outputs.found == 'true'
         shell: pwsh
         run: >
           dotnet publish "$env:CSPROJ"
@@ -47,15 +56,17 @@ jobs:
           -p:PublishSingleFile=true
           -p:IncludeNativeLibrariesForSelfExtract=true
           -p:PublishTrimmed=false
+          -p:UseWpf=true
           -o Publish/win-x64
 
-      # (Opcional) ZIP para que sea un único archivo descargable
       - name: Zip published output
+        if: steps.findproj.outputs.found == 'true'
         shell: pwsh
         run: |
           Compress-Archive -Path Publish/win-x64/* -DestinationPath OperativaLogistica-win-x64.zip
 
       - name: Upload artifact (ZIP)
+        if: steps.findproj.outputs.found == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: OperativaLogistica-win-x64
