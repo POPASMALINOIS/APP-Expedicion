@@ -1,0 +1,62 @@
+name: Build Windows (WPF .NET 8)
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: {}   # para ejecutarlo a mano desde Actions
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Detecta automáticamente el primer .csproj del repo
+      - name: Locate .csproj
+        id: findproj
+        shell: pwsh
+        run: |
+          $proj = Get-ChildItem -Recurse -Filter *.csproj | Select-Object -First 1
+          if (-not $proj) { throw "No se encontró ningún .csproj en el repositorio." }
+          "CSPROJ=$($proj.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Proyecto encontrado: $($proj.FullName)"
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore "$env:CSPROJ"
+
+      - name: Build (Release)
+        shell: pwsh
+        run: dotnet build "$env:CSPROJ" -c Release --no-restore
+
+      - name: Publish self-contained (win-x64, single file)
+        shell: pwsh
+        run: >
+          dotnet publish "$env:CSPROJ"
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:PublishTrimmed=false
+          -o Publish/win-x64
+
+      # (Opcional) ZIP para que sea un único archivo descargable
+      - name: Zip published output
+        shell: pwsh
+        run: |
+          Compress-Archive -Path Publish/win-x64/* -DestinationPath OperativaLogistica-win-x64.zip
+
+      - name: Upload artifact (ZIP)
+        uses: actions/upload-artifact@v4
+        with:
+          name: OperativaLogistica-win-x64
+          path: OperativaLogistica-win-x64.zip
